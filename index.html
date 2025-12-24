@@ -80,16 +80,16 @@
     </div>
 
     <script>
-        // 配置：增加 fixedTime (h:m) 用于次日时间点计算
+        // 配置：将 fixedTime 改为数组 fixedTimes 以支持多个时间点 (如 Dallas)
         const cityConfig = [
-            { name: "伦敦 (London)", id: "london", zone: "Europe/London", fixedTime: {h: 0, m: 20} }, // 12:20 AM
-            { name: "布宜诺斯艾利斯 (Buenos)", id: "buenos", zone: "America/Argentina/Buenos_Aires", fixedTime: {h: 0, m: 0} }, // 12:00 AM
-            { name: "多伦多 (Toronto)", id: "toronto", zone: "America/Toronto", fixedTime: {h: 0, m: 0} }, // 12:00 AM
-            { name: "纽约 (NYC)", id: "nyc", zone: "America/New_York", fixedTime: {h: 0, m: 51} }, // 12:51 AM
-            { name: "亚特兰大 (Atlanta)", id: "atlanta", zone: "America/New_York", fixedTime: {h: 0, m: 52} }, // 12:52 AM
-            { name: "达拉斯 (Dallas)", id: "dallas", zone: "America/Chicago", fixedTime: {h: 0, m: 11} }, // 12:11 AM
-            { name: "西雅图 (Seattle)", id: "seattle", zone: "America/Los_Angeles", fixedTime: {h: 0, m: 53} }, // 12:53 AM
-            { name: "首尔 (Seoul)", id: "seoul", zone: "Asia/Seoul", fixedTime: {h: 0, m: 0} } // 12:00 AM
+            { name: "伦敦 (London)", id: "london", zone: "Europe/London", fixedTimes: [{h: 0, m: 20}] }, // 12:20 AM
+            { name: "布宜诺斯艾利斯 (Buenos)", id: "buenos", zone: "America/Argentina/Buenos_Aires", fixedTimes: [{h: 0, m: 0}] }, // 12:00 AM
+            { name: "多伦多 (Toronto)", id: "toronto", zone: "America/Toronto", fixedTimes: [{h: 0, m: 0}] }, // 12:00 AM
+            { name: "纽约 (NYC)", id: "nyc", zone: "America/New_York", fixedTimes: [{h: 0, m: 51}] }, // 12:51 AM
+            { name: "亚特兰大 (Atlanta)", id: "atlanta", zone: "America/New_York", fixedTimes: [{h: 0, m: 52}] }, // 12:52 AM
+            { name: "达拉斯 (Dallas)", id: "dallas", zone: "America/Chicago", fixedTimes: [{h: 0, m: 11}, {h: 0, m: 53}] }, // 12:11 AM / 12:53 AM
+            { name: "西雅图 (Seattle)", id: "seattle", zone: "America/Los_Angeles", fixedTimes: [{h: 0, m: 53}] }, // 12:53 AM
+            { name: "首尔 (Seoul)", id: "seoul", zone: "Asia/Seoul", fixedTimes: [{h: 0, m: 0}] } // 12:00 AM
         ];
 
         const BEIJING_ZONE = "Asia/Shanghai";
@@ -273,7 +273,7 @@
 
         // 计算并更新"次日第1个时间点"的逻辑
         function updateNote(now, city) {
-            // 1. 获取当前在"当地"的日期
+            // 1. 获取当前在"当地"的日期 (Y, M, D)
             const parts = new Intl.DateTimeFormat('en-US', {
                 timeZone: city.zone,
                 year: 'numeric', month: 'numeric', day: 'numeric',
@@ -282,25 +282,33 @@
             const p = {};
             parts.forEach(({type, value}) => p[type] = parseInt(value));
 
-            // 2. 构造"当地"的"次日 + 固定时间"
-            const nextDayTimestamp = getTimestampFromParts(
-                p.year, p.month - 1, p.day + 1, 
-                city.fixedTime.h, city.fixedTime.m, 
-                city.zone
-            );
+            // 2. 遍历 fixedTimes 数组 (支持多时间点)
+            const results = city.fixedTimes.map(ft => {
+                // 构造"当地"的"次日 + 固定时间"
+                const nextDayTimestamp = getTimestampFromParts(
+                    p.year, p.month - 1, p.day + 1, 
+                    ft.h, ft.m, 
+                    city.zone
+                );
+                const nextDayDate = new Date(nextDayTimestamp);
+                
+                return {
+                    local: getDisplayParts(nextDayDate, city.zone),
+                    utc: getDisplayParts(nextDayDate, 'UTC'),
+                    bj: getDisplayParts(nextDayDate, BEIJING_ZONE)
+                };
+            });
+
+            // 3. 拼接并显示 (不再显示日期 date 字段，仅显示 time + ampm)
             
-            const nextDayDate = new Date(nextDayTimestamp);
+            const localText = results.map(r => `${r.local.time} ${r.local.ampm}`).join(' / ');
+            document.getElementById(`note-local-${city.id}`).innerText = localText;
 
-            // 3. 显示在对应格子下 (备注不需要显示秒，只显示时分和AMPM)
-            
-            const localNote = getDisplayParts(nextDayDate, city.zone);
-            document.getElementById(`note-local-${city.id}`).innerText = `${localNote.date} ${localNote.time} ${localNote.ampm}`;
+            const utcText = results.map(r => `${r.utc.time} ${r.utc.ampm}`).join(' / ');
+            document.getElementById(`note-utc-${city.id}`).innerText = utcText;
 
-            const utcNote = getDisplayParts(nextDayDate, 'UTC');
-            document.getElementById(`note-utc-${city.id}`).innerText = `${utcNote.date} ${utcNote.time} ${utcNote.ampm}`;
-
-            const bjNote = getDisplayParts(nextDayDate, BEIJING_ZONE);
-            document.getElementById(`note-bj-${city.id}`).innerText = `${bjNote.date} ${bjNote.time} ${bjNote.ampm}`;
+            const bjText = results.map(r => `${r.bj.time} ${r.bj.ampm}`).join(' / ');
+            document.getElementById(`note-bj-${city.id}`).innerText = bjText;
         }
 
         function formatDateForInput(dateObj, timeZone) {
