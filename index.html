@@ -30,7 +30,6 @@
         }
 
         /* 关键修复：强制让 Webkit 浏览器 (Chrome/Edge/Safari) 的日历触发区域铺满整个控件 */
-        /* 这样点击任何位置都会弹出日历，而不是聚焦到看不见的文本框里 */
         input[type="datetime-local"]::-webkit-calendar-picker-indicator {
             position: absolute;
             top: 0;
@@ -46,29 +45,30 @@
         .time-card:hover {
             background-color: #f8fafc;
             transform: translateY(-2px);
-            border-color: #3b82f6; /* hover时显示蓝色边框提示可点击 */
+            border-color: #3b82f6;
         }
     </style>
 </head>
 <body class="text-gray-800 min-h-screen p-4 md:p-8">
 
-    <div class="max-w-6xl mx-auto">
+    <div class="max-w-7xl mx-auto">
         <header class="mb-8 text-center">
             <h1 class="text-3xl font-bold text-gray-800 mb-2">
                 <i class="fa-regular fa-clock mr-2 text-blue-600"></i>全球城市时间转换
             </h1>
             <p class="text-gray-500 text-sm">
-                点击任意时间数字进行修改，所有城市自动同步
+                默认显示实时时间（秒数跳动）。点击任意数字修改后，秒数停止，锁定为手动模式。
             </p>
         </header>
 
         <!-- Current Reference Time Display -->
         <div class="sticky top-0 z-20 bg-white/90 backdrop-blur shadow-sm rounded-lg p-3 mb-6 flex justify-between items-center border border-gray-200">
-            <div class="text-sm font-semibold text-gray-600">
+            <div class="text-sm font-semibold text-gray-600 flex items-center gap-2 flex-wrap">
                 <span class="hidden md:inline">基准时间 (UTC): </span>
                 <span id="global-utc-display" class="font-mono text-blue-600 text-lg">Loading...</span>
+                <span id="mode-badge" class="ml-2 px-2 py-0.5 rounded text-xs font-bold bg-green-100 text-green-700">实时模式</span>
             </div>
-            <button onclick="resetToNow()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm transition shadow-sm flex items-center gap-2">
+            <button onclick="resetToNow()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm transition shadow-sm flex items-center gap-2 whitespace-nowrap">
                 <i class="fa-solid fa-rotate-right"></i> 重置为现在
             </button>
         </div>
@@ -80,19 +80,22 @@
     </div>
 
     <script>
+        // 配置：增加 fixedTime (h:m) 用于次日时间点计算
         const cityConfig = [
-            { name: "伦敦 (London)", id: "london", zone: "Europe/London" },
-            { name: "布宜诺斯艾利斯 (Buenos)", id: "buenos", zone: "America/Argentina/Buenos_Aires" },
-            { name: "多伦多 (Toronto)", id: "toronto", zone: "America/Toronto" },
-            { name: "纽约 (NYC)", id: "nyc", zone: "America/New_York" },
-            { name: "亚特兰大 (Atlanta)", id: "atlanta", zone: "America/New_York" }, 
-            { name: "达拉斯 (Dallas)", id: "dallas", zone: "America/Chicago" },
-            { name: "西雅图 (Seattle)", id: "seattle", zone: "America/Los_Angeles" },
-            { name: "首尔 (Seoul)", id: "seoul", zone: "Asia/Seoul" }
+            { name: "伦敦 (London)", id: "london", zone: "Europe/London", fixedTime: {h: 0, m: 20} }, // 12:20 AM
+            { name: "布宜诺斯艾利斯 (Buenos)", id: "buenos", zone: "America/Argentina/Buenos_Aires", fixedTime: {h: 0, m: 0} }, // 12:00 AM
+            { name: "多伦多 (Toronto)", id: "toronto", zone: "America/Toronto", fixedTime: {h: 0, m: 0} }, // 12:00 AM
+            { name: "纽约 (NYC)", id: "nyc", zone: "America/New_York", fixedTime: {h: 0, m: 51} }, // 12:51 AM
+            { name: "亚特兰大 (Atlanta)", id: "atlanta", zone: "America/New_York", fixedTime: {h: 0, m: 52} }, // 12:52 AM
+            { name: "达拉斯 (Dallas)", id: "dallas", zone: "America/Chicago", fixedTime: {h: 0, m: 11} }, // 12:11 AM
+            { name: "西雅图 (Seattle)", id: "seattle", zone: "America/Los_Angeles", fixedTime: {h: 0, m: 53} }, // 12:53 AM
+            { name: "首尔 (Seoul)", id: "seoul", zone: "Asia/Seoul", fixedTime: {h: 0, m: 0} } // 12:00 AM
         ];
 
         const BEIJING_ZONE = "Asia/Shanghai";
         let currentTimestamp = Date.now();
+        let isManualMode = false; // 标记是否处于手动编辑模式
+        let timerId = null;
 
         function init() {
             const grid = document.getElementById('cities-grid');
@@ -119,22 +122,47 @@
                 grid.appendChild(card);
             });
 
+            // 启动定时器
+            startTimer();
             updateAllInputs();
+        }
+
+        // 启动实时更新
+        function startTimer() {
+            if (timerId) clearInterval(timerId);
+            timerId = setInterval(() => {
+                if (!isManualMode) {
+                    currentTimestamp = Date.now();
+                    updateAllInputs();
+                }
+            }, 1000);
         }
 
         // 辅助生成时间块 HTML
         function createTimeBlock(cityId, type, label, colorClass) {
-            // 添加 onclick 事件作为双重保险，如果 CSS 覆盖失效，JS 会主动唤起选择器
             return `
                 <div class="relative group rounded-lg bg-gray-50 hover:bg-white border border-gray-200 hover:border-blue-300 transition-all p-4 text-center cursor-pointer time-card" 
                      onclick="openPicker(this)">
                     <!-- 标题 -->
                     <div class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">${label}</div>
                     
-                    <!-- 自定义显示区域：大时间，小日期 -->
-                    <div class="flex flex-col items-center justify-center pointer-events-none">
-                        <div class="text-5xl font-bold tracking-tight ${colorClass} leading-none mb-1" id="display-time-${type}-${cityId}">--:--</div>
+                    <!-- 自定义显示区域：大时间 (AM/PM) + 小秒数，小日期 -->
+                    <div class="flex flex-col items-center justify-center pointer-events-none mb-2">
+                        <div class="flex items-baseline justify-center gap-1 ${colorClass} mb-1">
+                            <!-- 时:分 -->
+                            <span class="text-4xl lg:text-5xl font-bold tracking-tight leading-none" id="display-time-${type}-${cityId}">--:--</span>
+                            <!-- 秒 (较小，淡色) -->
+                            <span class="text-xl font-mono opacity-60 w-[1.3em] text-left" id="display-sec-${type}-${cityId}">--</span>
+                            <!-- AM/PM -->
+                            <span class="text-xl font-bold" id="display-ampm-${type}-${cityId}">--</span>
+                        </div>
                         <div class="text-sm font-medium text-gray-400" id="display-date-${type}-${cityId}">--/--</div>
+                    </div>
+
+                    <!-- 备注：次日第1个时间点 -->
+                    <div class="border-t border-gray-100 mt-2 pt-2 w-full">
+                         <div class="text-[10px] text-gray-400 uppercase tracking-wider mb-0.5">次日第1个时间点</div>
+                         <div class="text-xs font-mono font-semibold text-gray-600" id="note-${type}-${cityId}">Calculating...</div>
                     </div>
 
                     <!-- 隐形输入框 -->
@@ -143,23 +171,20 @@
                         onchange="handleTimeChange('${cityId}', '${type}', this.value)"
                         onclick="event.stopPropagation()" 
                     >
-                    <div class="absolute bottom-2 right-3 text-gray-200 group-hover:text-blue-200 transition">
+                    <div class="absolute top-3 right-3 text-gray-200 group-hover:text-blue-200 transition">
                         <i class="fa-solid fa-pen"></i>
                     </div>
                 </div>
             `;
         }
 
-        // 新增：主动唤起选择器的辅助函数
         function openPicker(container) {
             const input = container.querySelector('input');
             if (input) {
                 try {
-                    // 现代浏览器支持 showPicker() API
                     if (typeof input.showPicker === 'function') {
                         input.showPicker();
                     } else {
-                        // 降级处理：模拟点击（配合 CSS 覆盖 trick）
                         input.click();
                     }
                 } catch (e) {
@@ -171,9 +196,13 @@
         function handleTimeChange(cityId, type, value) {
             if (!value) return;
 
+            // 切换到手动模式
+            isManualMode = true;
+            document.getElementById('mode-badge').className = "ml-2 px-2 py-0.5 rounded text-xs font-bold bg-orange-100 text-orange-700";
+            document.getElementById('mode-badge').innerText = "手动编辑";
+
             const city = cityConfig.find(c => c.id === cityId);
             
-            // 解析输入值 YYYY-MM-DDTHH:mm
             const [y, m, d, h, min] = [
                 parseInt(value.substring(0, 4)),
                 parseInt(value.substring(5, 7)) - 1,
@@ -187,7 +216,6 @@
             else if (type === 'bj') targetZone = BEIJING_ZONE;
             else targetZone = city.zone;
 
-            // 反向计算时间戳
             currentTimestamp = getTimestampFromParts(y, m, d, h, min, targetZone);
             updateAllInputs();
         }
@@ -210,31 +238,69 @@
 
         function updateAllInputs() {
             const now = new Date(currentTimestamp);
-            document.getElementById('global-utc-display').innerText = now.toISOString().replace('T', ' ').substring(0, 16) + ' UTC';
+            
+            // 全局时间显示 (带秒)
+            const globalParts = getDisplayParts(now, 'UTC');
+            document.getElementById('global-utc-display').innerText = `${globalParts.dateFull} ${globalParts.time}:${globalParts.seconds} ${globalParts.ampm} UTC`;
 
             cityConfig.forEach(city => {
                 updateSingleBlock(now, city.id, 'local', city.zone);
                 updateSingleBlock(now, city.id, 'utc', 'UTC');
                 updateSingleBlock(now, city.id, 'bj', BEIJING_ZONE);
 
-                // 更新 Offset
                 const offset = calculateOffset(now, city.zone);
                 document.getElementById(`offset-${city.id}`).innerText = offset;
+
+                // 更新备注：次日第一个时间点
+                updateNote(now, city);
             });
         }
 
         function updateSingleBlock(now, cityId, type, zone) {
-            // 1. 设置隐藏输入框的值 (格式 YYYY-MM-DDTHH:mm)
+            // 1. 设置输入框 (需保持 24h 格式用于 input value)
             const inputVal = formatDateForInput(now, zone);
             const inputEl = document.getElementById(`input-${type}-${cityId}`);
             inputEl.value = inputVal;
 
-            // 2. 获取拆分后的时间字符串 (Date, Time)
+            // 2. 显示文本 (12h AM/PM + Seconds)
             const parts = getDisplayParts(now, zone);
-            
-            // 3. 更新大字和小字
             document.getElementById(`display-time-${type}-${cityId}`).innerText = parts.time;
+            document.getElementById(`display-sec-${type}-${cityId}`).innerText = parts.seconds;
+            document.getElementById(`display-ampm-${type}-${cityId}`).innerText = parts.ampm;
+            
             document.getElementById(`display-date-${type}-${cityId}`).innerText = parts.date;
+        }
+
+        // 计算并更新"次日第1个时间点"的逻辑
+        function updateNote(now, city) {
+            // 1. 获取当前在"当地"的日期
+            const parts = new Intl.DateTimeFormat('en-US', {
+                timeZone: city.zone,
+                year: 'numeric', month: 'numeric', day: 'numeric',
+                hour12: false
+            }).formatToParts(now);
+            const p = {};
+            parts.forEach(({type, value}) => p[type] = parseInt(value));
+
+            // 2. 构造"当地"的"次日 + 固定时间"
+            const nextDayTimestamp = getTimestampFromParts(
+                p.year, p.month - 1, p.day + 1, 
+                city.fixedTime.h, city.fixedTime.m, 
+                city.zone
+            );
+            
+            const nextDayDate = new Date(nextDayTimestamp);
+
+            // 3. 显示在对应格子下 (备注不需要显示秒，只显示时分和AMPM)
+            
+            const localNote = getDisplayParts(nextDayDate, city.zone);
+            document.getElementById(`note-local-${city.id}`).innerText = `${localNote.date} ${localNote.time} ${localNote.ampm}`;
+
+            const utcNote = getDisplayParts(nextDayDate, 'UTC');
+            document.getElementById(`note-utc-${city.id}`).innerText = `${utcNote.date} ${utcNote.time} ${utcNote.ampm}`;
+
+            const bjNote = getDisplayParts(nextDayDate, BEIJING_ZONE);
+            document.getElementById(`note-bj-${city.id}`).innerText = `${bjNote.date} ${bjNote.time} ${bjNote.ampm}`;
         }
 
         function formatDateForInput(dateObj, timeZone) {
@@ -248,22 +314,28 @@
             return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
         }
 
+        // 修改：支持 AM/PM 并提取 Seconds
         function getDisplayParts(dateObj, timeZone) {
             const parts = new Intl.DateTimeFormat('en-US', {
                 timeZone: timeZone,
+                year: 'numeric',
                 month: '2-digit',
                 day: '2-digit',
-                hour: '2-digit',
+                hour: 'numeric', 
                 minute: '2-digit',
-                hour12: false
+                second: '2-digit', // 获取秒数
+                hour12: true     
             }).formatToParts(dateObj);
             
             const p = {};
             parts.forEach(({type, value}) => p[type] = value);
             
             return {
+                dateFull: `${p.year}-${p.month}-${p.day}`,
                 date: `${p.month}/${p.day}`,
-                time: `${p.hour}:${p.minute}`
+                time: `${p.hour}:${p.minute}`,
+                seconds: p.second,
+                ampm: p.dayPeriod || ''
             };
         }
 
@@ -277,6 +349,9 @@
         }
 
         function resetToNow() {
+            isManualMode = false;
+            document.getElementById('mode-badge').className = "ml-2 px-2 py-0.5 rounded text-xs font-bold bg-green-100 text-green-700";
+            document.getElementById('mode-badge').innerText = "实时模式";
             currentTimestamp = Date.now();
             updateAllInputs();
         }
